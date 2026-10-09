@@ -1,0 +1,317 @@
+YouTube-Like Backend System (Node.js + Prisma + Redis)
+
+This backend powers a YouTube-style video platform with:
+
+Secure video uploads
+
+Background video processing
+
+HLS streaming
+
+Watch history tracking
+
+Multi-phase recommendation system
+
+Autoplay & engagement feedback loop
+
+The system is designed to be scalable, fault-tolerant, and explainable.
+
+🏗️ High-Level Architecture
+Client (Web / Mobile)
+   |
+   | REST + WebSocket
+   v
+Express API (Node.js)
+   |
+   | Prisma ORM
+   v
+PostgreSQL
+   |
+   | Background Jobs
+   v
+Redis + Worker + FFmpeg
+   |
+   v
+S3 (Raw + Processed Videos)
+
+📁 Backend Folder Structure (Key Parts)
+BACKEND/
+├── controllers/
+│   ├── feed.controller.js
+│   ├── video.controller.js
+│   ├── recommendation.controller.js
+│   └── watch.controller.js
+│
+├── services/
+│   ├── feed.service.js
+│   ├── trending.service.js
+│   ├── collaborative.service.js
+│   ├── recommendation.service.js
+│   └── hybridRank.service.js
+│
+├── jobs/
+│   └── cleanup.job.js
+│
+├── routes/
+│   ├── feed.routes.js
+│   └── video.routes.js
+│
+├── workers/
+│   └── video.worker.js
+│
+├── lib/
+│   ├── redis.js
+│   └── s3.js
+│
+└── prisma/
+    └── schema.prisma
+
+🎬 Video Lifecycle Flow
+1️⃣ Upload
+
+Client requests upload initialization
+
+Backend creates a Video record with status UPLOADING
+
+Signed S3 upload URL is returned
+
+2️⃣ Progress Tracking
+
+Client uploads directly to S3
+
+Upload progress is periodically reported to backend
+
+Stored in uploadProgress
+
+3️⃣ Processing
+
+After upload completion:
+
+Video enters PROCESSING
+
+Background worker downloads raw video
+
+FFmpeg converts video into HLS (multi-quality)
+
+Processed files uploaded to S3
+
+4️⃣ Ready State
+
+Status → READY
+
+master.m3u8 stored
+
+Video becomes publicly available
+
+5️⃣ Cleanup Safety
+
+Cron job marks stuck uploads as PROCESSING_FAILED
+
+Prevents infinite hanging videos
+
+Raw files are not deleted prematurely
+
+📊 Watch Tracking & Engagement
+WatchHistory Model
+
+Each watch event records:
+
+userId
+
+videoId
+
+watchDuration
+
+completed (true if user finished video)
+
+View Counting Rule
+
+Views increment only once per user per video, and only on completion.
+
+This prevents:
+
+Fake refresh views
+
+Partial scroll inflation
+
+🧠 Recommendation System (Core Feature)
+
+The recommendation engine is built in phases, just like real platforms.
+
+🔹 Phase 1: Home Feed (Fresh Content)
+
+Endpoint
+
+GET /api/feed/home
+
+
+Logic
+
+Only READY + PUBLIC videos
+
+Ordered by createdAt DESC
+
+Cursor-based pagination
+
+Used for discovery
+
+Use Case
+
+Home page feed for all users
+
+🔹 Phase 2: Personalized Feed
+
+Signal Source
+
+User WatchHistory
+
+Idea
+
+Show content similar to what the user watches frequently
+
+Examples
+
+Same creators
+
+Frequently watched categories (future extension)
+
+This phase introduces user behavior awareness.
+
+🔹 Phase 3: Trending Algorithm
+
+Service
+
+services/trending.service.js
+
+
+Signals Used
+
+Recent views (last 24h)
+
+Completion count
+
+Video age decay
+
+Formula (simplified)
+
+score =
+  recentViews * 3 +
+  recentCompletions * 5 -
+  ageInHours * 0.5
+
+
+Purpose
+
+Handle cold-start users & surface popular content
+
+🔹 Phase 4: Collaborative Filtering
+
+Core Idea
+
+“Users who watched this video also watched…”
+
+How it works
+
+Find users who watched the current video
+
+Fetch other videos watched by those users
+
+Rank by frequency
+
+This creates behavior-based recommendations.
+
+🔹 Phase 5: Watch Page Recommendations + Autoplay
+
+Endpoint
+
+GET /api/videos/:id/recommendations
+
+
+Pipeline
+
+Same creator videos
+
+Collaborative filtering
+
+Trending fallback
+
+Deduplication using Map
+
+Explainable reasons attached:
+
+same_creator
+
+collaborative
+
+trending
+
+Use Case
+
+Right sidebar on watch page
+
+Autoplay “Up Next” logic
+
+🔁 Hybrid Ranking (Advanced)
+
+Service
+
+hybridRank.service.js
+
+
+Combines:
+
+Trending score
+
+Personal relevance
+
+Collaborative signals
+
+Weighted Ranking
+
+finalScore =
+  trending * 0.4 +
+  personal * 0.4 +
+  collaborative * 0.2
+
+
+Results are:
+
+Cached in Redis
+
+User-specific
+
+Fast to serve
+
+▶ Autoplay Flow
+
+User watches video
+
+recordView stores engagement
+
+Recommendations fetched
+
+On video end → next video auto-plays
+
+Feedback loop improves future recommendations
+
+🚀 Why This System Is Production-Ready
+
+✅ Cursor pagination (no offset bugs)
+✅ BigInt serialization handled
+✅ Redis caching for heavy queries
+✅ Background workers for CPU-heavy tasks
+✅ Safe S3 deletion strategy
+✅ Explainable recommendations
+✅ Clear separation of controllers & services
+
+📌 Future Enhancements (Optional)
+
+Category/tag embeddings
+
+Session-based recommendations
+
+Diversity penalties
+
+A/B testing weights
+
+ML-based ranking

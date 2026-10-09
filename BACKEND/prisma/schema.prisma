@@ -1,0 +1,450 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // directUrl = env("DIRECT_URL")
+}
+
+  
+// USER MANAGEMENT
+
+  model User {
+    id            String   @id @default(uuid())
+    email         String   @unique
+    username      String   @unique
+    passwordHash  String
+    displayName   String?
+    avatarUrl     String?
+    channelBanner String?
+    bio           String?
+      searchVector  Unsupported("tsvector")?
+
+    isVerified    Boolean  @default(false)
+    createdAt     DateTime @default(now())
+    updatedAt     DateTime @updatedAt
+
+    // Relations
+    videos        Video[]
+    comments      Comment[]
+    likes         Like[]
+      commentLikes  CommentLike[]
+
+    subscriptions Subscription[] @relation("Subscriber")
+    subscribers   Subscription[] @relation("Channel")
+    playlists     Playlist[]
+    watchHistory  WatchHistory[]
+    notifications Notification[]
+
+    @@index([email])
+    @@index([username])
+  }
+
+  // VIDEO MANAGEMENT
+
+model Video {
+  id              String      @id @default(uuid())
+  title           String
+  description     String?
+  thumbnailUrl    String?
+  searchVector Unsupported("tsvector")?
+
+  duration        Int? // in seconds
+  status          VideoStatus @default(UPLOADING)
+  visibility      Visibility  @default(PRIVATE)
+  views           Int         @default(0)
+  originalFileUrl String?
+  uploadProgress  Int         @default(0)
+  masterPlaylist  String? // master.m3u8 URL
+  
+  // Metadata
+  fileSize        String?     // Changed from BigInt? to String?
+  mimeType        String?
+  originalName    String?
+  
+  // Publishing
+  publishedAt     DateTime?
+  scheduledAt     DateTime?
+  
+  // User relation
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  uploadSession   UploadSession?
+  qualities       VideoQuality[]
+  comments        Comment[]
+  likes           Like[]
+  tags            VideoTag[]
+  playlistVideos  PlaylistVideo[]
+  watchHistory    WatchHistory[]
+
+  processingStage     String?
+  errorMessage        String?
+  errorCode           String?
+  processingAttempts  Int      @default(0)
+  lastProcessedAt     DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@index([visibility])
+  @@index([createdAt])
+  @@index([views])
+} 
+enum VideoStatus {
+  UPLOADING
+  UPLOAD_FAILED
+
+  PROCESSING
+  PROCESSING_FAILED
+
+  READY
+  CANCELLED
+  DELETED
+}
+
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+  UNLISTED
+}
+
+// UPLOAD SESSION MANAGEMENT
+
+model UploadSession {
+  id              String   @id @default(uuid())
+  videoId         String   @unique
+  video           Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  totalChunks     Int
+  uploadedChunks  Int      @default(0)
+  chunkSize       Int // in bytes
+  totalSize       BigInt
+  
+  status          UploadStatus @default(IN_PROGRESS)
+  tempPath        String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  completedAt     DateTime?
+
+
+  uploadedBytes   BigInt @default(0)
+  lastChunkIndex  Int?
+
+  chunks          UploadChunk[]
+
+  @@index([videoId])
+  @@index([status])
+}
+
+model UploadChunk {
+  id              String   @id @default(uuid())
+  sessionId       String
+  session         UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  chunkIndex      Int
+  chunkSize       Int
+  checksum        String?
+  filePath        String
+  
+  status          ChunkStatus @default(PENDING)
+  uploadedAt      DateTime    @default(now())
+  verifiedAt DateTime?
+
+  @@unique([sessionId, chunkIndex])
+  @@index([sessionId])
+}
+
+enum UploadStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ChunkStatus {
+  PENDING
+  UPLOADED
+  VERIFIED
+  FAILED
+}
+
+// VIDEO QUALITY & PROCESSING
+
+model VideoQuality {
+  id           String  @id @default(uuid())
+  videoId      String
+  video        Video   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  resolution   String // 360p, 480p, 720p, 1080p, 4k
+  width        Int
+  height       Int
+  bitrate      Int // in kbps
+  
+  playlistUrl  String // index.m3u8 URL
+  storageSize  BigInt?
+  
+  status       ProcessingStatus @default(PENDING)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  error String?
+
+  @@unique([videoId, resolution])
+  @@index([videoId])
+  @@index([status])
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ENGAGEMENT (LIKES, COMMENTS)
+
+model Like {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoId   String
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+
+  @@unique([userId, videoId])
+  @@index([videoId])
+  @@index([userId])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoId   String
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  // For nested comments (replies)
+  parentId  String?
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
+  
+  likes     Int      @default(0)
+  isPinned  Boolean  @default(false)
+  isEdited  Boolean  @default(false)
+    commentLikes  CommentLike[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([videoId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model CommentLike {
+  id        String   @id @default(uuid())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, commentId])
+  @@index([commentId])
+  @@index([userId])
+}
+
+
+// SUBSCRIPTIONS
+
+model Subscription {
+  id          String   @id @default(uuid())
+  
+  subscriberId String
+  subscriber   User    @relation("Subscriber", fields: [subscriberId], references: [id], onDelete: Cascade)
+  
+  channelId    String
+  channel      User    @relation("Channel", fields: [channelId], references: [id], onDelete: Cascade)
+  
+    subscribedFromVideoId String?  
+
+
+  notifications Boolean @default(true)
+  createdAt     DateTime @default(now())
+
+  @@unique([subscriberId, channelId])
+  @@index([subscriberId])
+  @@index([channelId])
+}
+
+// PLAYLISTS
+
+model Playlist {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  visibility  Visibility @default(PRIVATE)
+  thumbnailUrl String?
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  videos      PlaylistVideo[]
+
+  @@index([userId])
+}
+
+model PlaylistVideo {
+  id         String   @id @default(uuid())
+  
+  playlistId String
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  
+  videoId    String
+  video      Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  position   Int
+  addedAt    DateTime @default(now())
+
+  @@unique([playlistId, videoId])
+  @@index([playlistId])
+}
+
+// TAGS & CATEGORIES
+
+model Tag {
+  id     String     @id @default(uuid())
+  name   String     @unique
+  videos VideoTag[]
+
+  @@index([name])
+}
+
+model VideoTag {
+  id      String @id @default(uuid())
+  
+  videoId String
+  video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  tagId   String
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, tagId])
+  @@index([videoId])
+  @@index([tagId])
+}
+
+// WATCH HISTORY & ANALYTICS
+
+model WatchHistory {
+  id            String   @id @default(uuid())
+  
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  videoId       String
+  video         Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  watchedAt     DateTime @default(now())
+  watchDuration Int // in seconds
+  completed     Boolean  @default(false)
+
+  @@unique([userId, videoId])  // ✅ Add this line
+  @@index([userId])
+  @@index([videoId])
+  @@index([watchedAt])
+}
+
+// NOTIFICATIONS
+
+model Notification {
+  id        String   @id @default(uuid())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type      NotificationType
+  title     String
+  message   String
+  link      String?
+  
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+enum NotificationType {
+  NEW_VIDEO
+  NEW_COMMENT
+  NEW_LIKE
+  NEW_SUBSCRIBER
+  PROCESSING_COMPLETE
+  PROCESSING_FAILED
+}
+
+// PROCESSING JOBS (Optional - can use Redis)
+
+model ProcessingJob {
+  id          String   @id @default(uuid())
+  videoId     String
+  
+  jobType     JobType
+  status      JobStatus @default(PENDING)
+  priority    Int       @default(0)
+  
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  
+  error       String?
+  metadata    Json?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  @@index([videoId])
+  @@index([status])
+  @@index([jobType])
+}
+
+enum JobType {
+  VIDEO_TRANSCODE
+  THUMBNAIL_GENERATE
+  VIDEO_MERGE
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+

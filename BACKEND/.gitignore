@@ -1,0 +1,13 @@
+node_modules
+# Keep environment variables out of version control
+.env
+.env.*
+!.env.example
+
+# Storage and logs
+minio-data/
+logs/
+*.log
+
+# Prisma generated
+/generated/prisma

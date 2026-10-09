@@ -1,0 +1,353 @@
+openapi: 3.0.3
+info:
+  title: YouTube Clone Backend API
+  description: Production-grade video streaming backend (Node.js, Express, Prisma, Redis, MinIO, BullMQ, FFmpeg)
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local server
+
+tags:
+  - name: Auth
+  - name: Videos
+  - name: Comments
+  - name: Feed
+  - name: Subscriptions
+  - name: Search
+  - name: Thumbnails
+  - name: Recommendations
+  - name: Analytics
+  - name: Health
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    videoId:
+      name: videoId
+      in: path
+      required: true
+      schema:
+        type: string
+    channelId:
+      name: channelId
+      in: path
+      required: true
+      schema:
+        type: string
+    commentId:
+      name: commentId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+
+    RegisterRequest:
+      type: object
+      required: [email, username, password, displayName]
+      properties:
+        email:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+        displayName:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    Video:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+        status:
+          type: string
+        duration:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        userId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+paths:
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: API healthy
+
+  /api/register:
+    post:
+      tags: [Auth]
+      summary: Register user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: Registered successfully
+
+  /api/login:
+    post:
+      tags: [Auth]
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /api/aboutme:
+    get:
+      tags: [Auth]
+      summary: Get own profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+
+  /api/update:
+    put:
+      tags: [Auth]
+      summary: Update profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Profile updated
+
+  /api/delete:
+    delete:
+      tags: [Auth]
+      summary: Delete account
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Account deleted
+
+  /api/videos/upload/init:
+    post:
+      tags: [Videos]
+      summary: Initialize video upload
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Presigned URL returned
+
+  /api/videos/upload/complete:
+    post:
+      tags: [Videos]
+      summary: Complete upload and trigger processing
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Processing started
+
+  /api/videos/{videoId}:
+    get:
+      tags: [Videos]
+      summary: Get video details
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: Video details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+
+    put:
+      tags: [Videos]
+      summary: Update video metadata
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: Video updated
+
+    delete:
+      tags: [Videos]
+      summary: Delete video
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: Video deleted
+
+  /api/videos/{videoId}/view:
+    post:
+      tags: [Videos]
+      summary: Record video view
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: View recorded
+
+  /api/videos/{videoId}/recommendations:
+    get:
+      tags: [Videos]
+      summary: Get video recommendations
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: Recommendations list
+
+  /api/videos/{videoId}/comments:
+    get:
+      tags: [Comments]
+      summary: Get comments
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: Comments fetched
+
+    post:
+      tags: [Comments]
+      summary: Add comment
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: Comment added
+
+  /api/feed/home:
+    get:
+      tags: [Feed]
+      summary: Home feed
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Feed returned
+
+  /api/feed/trending:
+    get:
+      tags: [Feed]
+      summary: Trending feed
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Trending videos
+
+  /api/search:
+    get:
+      tags: [Search]
+      summary: Search videos and channels
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [all, video, channel]
+      responses:
+        '200':
+          description: Search results
+
+  /api/subscribe/{channelId}:
+    post:
+      tags: [Subscriptions]
+      summary: Subscribe to channel
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+      responses:
+        '200':
+          description: Subscribed
+
+    delete:
+      tags: [Subscriptions]
+      summary: Unsubscribe
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+      responses:
+        '200':
+          description: Unsubscribed
+
+  /api/analytics/video/{videoId}:
+    get:
+      tags: [Analytics]
+      summary: Video analytics
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/videoId'
+      responses:
+        '200':
+          description: Analytics data
