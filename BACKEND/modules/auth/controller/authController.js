@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const prisma = require("../../../prisma/client"); 
+const { getPublicStorageUrl } = require("../../../config/storageUrl");
 
 
 const registerUser = async (req, res) => {
@@ -127,15 +128,16 @@ const updateUser = async (req, res) => {
       bio,
     };
 
-  if (avatarFile) {
-  data.avatarUrl =
-    `${process.env.SUPABASE_PUBLIC_STORAGE_URL}/${process.env.S3_USER_MEDIA_BUCKET}/${avatarFile.key}`;
-}
+  const { getPublicStorageUrl } = require("../../../config/storageUrl");
+  const mediaBucket = process.env.S3_USER_MEDIA_BUCKET || "user-media";
 
-if (bannerFile) {
-  data.channelBanner =
-    `${process.env.SUPABASE_PUBLIC_STORAGE_URL}/${process.env.S3_USER_MEDIA_BUCKET}/${bannerFile.key}`;
-}
+  if (avatarFile) {
+    data.avatarUrl = getPublicStorageUrl(mediaBucket, avatarFile.key);
+  }
+
+  if (bannerFile) {
+    data.channelBanner = getPublicStorageUrl(mediaBucket, bannerFile.key);
+  }
 
     const user = await prisma.user.update({
       where: { id: req.user.id },
@@ -225,10 +227,15 @@ const getMyUploadedVideos = async (req, res) => {
       },
     });
 
+    const processedBucket = process.env.S3_PROCESSED_BUCKET || "processed-videos";
     return res.status(200).json({
       success: true,
       count: videos.length,
-      videos,
+      videos: videos.map((v) => ({
+        ...v,
+        thumbnailUrl: getPublicStorageUrl(processedBucket, v.thumbnailUrl),
+        views: Number(v.views),
+      })),
     });
   } catch (error) {
     console.error("Fetch user videos error:", error);
@@ -242,75 +249,107 @@ const getMyUploadedVideos = async (req, res) => {
 const getChannelDetails = async (req, res) => {
   try {
     const { channelId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 30));
+    const skip = (page - 1) * limit;
 
-    // 1️ Get channel info
-    const channel = await prisma.user.findUnique({
-      where: { id: channelId },
-      select: {
-        id: true,
-        displayName: true,
-        avatarUrl: true,
-        channelBanner: true,
-        bio: true,
-        createdAt: true,
-        subscribers: true,
-        videos: {
-          where: {
-            visibility: "PUBLIC"
+    // 1️ Run parallel queries: channel info with DB counts, total view aggregation, and paginated videos
+    const [channel, totalViewsResult, videos] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: channelId },
+        select: {
+          id: true,
+          displayName: true,
+          username: true,
+          avatarUrl: true,
+          channelBanner: true,
+          bio: true,
+          createdAt: true,
+          _count: {
+            select: {
+              subscribers: true,
+              videos: {
+                where: { visibility: "PUBLIC", status: "READY" },
+              },
+            },
           },
-          select: {
-            id: true,
-            title: true,
-            thumbnailUrl: true,
-            views: true,
-            visibility: true,
-            createdAt: true,
-            duration: true
-          },
-          orderBy: {
-            createdAt: "desc"
-          }
-        }
-      }
-    });
+        },
+      }),
+      prisma.video.aggregate({
+        where: {
+          userId: channelId,
+          visibility: "PUBLIC",
+          status: "READY",
+        },
+        _sum: {
+          views: true,
+        },
+      }),
+      prisma.video.findMany({
+        where: {
+          userId: channelId,
+          visibility: "PUBLIC",
+          status: "READY",
+        },
+        select: {
+          id: true,
+          title: true,
+          thumbnailUrl: true,
+          views: true,
+          visibility: true,
+          createdAt: true,
+          duration: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip,
+        take: limit,
+      }),
+    ]);
 
     if (!channel) {
       return res.status(404).json({
         success: false,
-        message: "Channel not found"
+        message: "Channel not found",
       });
     }
 
-    // 2️ Subscriber Count
-    const subscriberCount = channel.subscribers.length;
-
-    // 3️ Total Views
-    const totalViews = channel.videos.reduce(
-      (sum, video) => sum + video.views,
-      0
-    );
+    const subscriberCount = channel._count.subscribers;
+    const totalVideos = channel._count.videos;
+    const totalViews = totalViewsResult._sum.views || 0;
 
     return res.json({
       success: true,
       channel: {
         id: channel.id,
-        name: channel.displayName,
+        name: channel.displayName || channel.username,
+        username: channel.username,
         avatar: channel.avatarUrl,
         banner: channel.channelBanner,
         bio: channel.bio,
         joinedAt: channel.createdAt,
         subscriberCount,
-        totalVideos: channel.videos.length,
-        totalViews
+        totalVideos,
+        totalViews,
       },
-      videos: channel.videos
+      videos: videos.map((v) => ({
+        ...v,
+        thumbnailUrl: getPublicStorageUrl(processedBucket, v.thumbnailUrl),
+        views: Number(v.views),
+      })),
+      pagination: {
+        page,
+        limit,
+        hasMore: videos.length === limit,
+      },
     });
 
   } catch (error) {
     console.error("Channel details error:", error);
     res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };

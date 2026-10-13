@@ -31,21 +31,26 @@ const getVideoById = async (req, res) => {
     return res.status(403).json({ message: "Video is private" });
   }
 
-  // construct full public URLs
-  const baseUrl = `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public`;
+  const { getPublicStorageUrl } = require("../../../config/storageUrl");
   const serialized = serializeBigInt(video);
+
+  const processedBucket = process.env.S3_PROCESSED_BUCKET || "processed-videos";
+  const finalStreamUrl = video.masterPlaylist
+    ? getPublicStorageUrl(processedBucket, video.masterPlaylist)
+    : null;
+  const finalThumbUrl = getPublicStorageUrl(processedBucket, video.thumbnailUrl);
 
   return res.json({
     ...serialized,
-    thumbnailUrl: video.thumbnailUrl,  // already full URL from worker
-    streamUrl: video.masterPlaylist
-      ? `${baseUrl}/${process.env.S3_PROCESSED_BUCKET}/${video.masterPlaylist}`
-      : null,
+    thumbnailUrl: finalThumbUrl,
+    streamUrl: finalStreamUrl,
   });
 };
 
 const getStreamUrl = async (req, res) => {
   const { id } = req.params;
+  const { getPublicStorageUrl } = require("../../../config/storageUrl");
+
   const video = await prisma.video.findUnique({
     where: { id },
     select: {
@@ -56,8 +61,10 @@ const getStreamUrl = async (req, res) => {
   if (!video || video.status !== "READY") {
     return res.status(404).json({ message: "Video not ready" });
   }
+
+  const processedBucket = process.env.S3_PROCESSED_BUCKET || "processed-videos";
   return res.json({
-    streamUrl: `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/${process.env.S3_PROCESSED_BUCKET}/${video.masterPlaylist}`,
+    streamUrl: getPublicStorageUrl(processedBucket, video.masterPlaylist),
   });
 };
 

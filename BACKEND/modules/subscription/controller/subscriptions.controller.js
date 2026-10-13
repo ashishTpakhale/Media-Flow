@@ -1,6 +1,8 @@
 
 const { PrismaClient } = require("@prisma/client");
+const { getPublicStorageUrl } = require("../../../config/storageUrl");
 const prisma = new PrismaClient();
+
 //send the video id to get the exact video from which the user subscribed
 const subscribeChannel = async (req, res) => {
   try {
@@ -12,24 +14,18 @@ const subscribeChannel = async (req, res) => {
       return res.status(400).json({ message: "Cannot subscribe to yourself" });
     }
 
-    const existing = await prisma.subscription.findUnique({
+    await prisma.subscription.upsert({
       where: {
         subscriberId_channelId: {
           subscriberId,
           channelId,
         },
       },
-    });
-
-    if (existing) {
-      return res.json({ message: "Already subscribed" });
-    }
-
-    await prisma.subscription.create({
-      data: {
+      update: {},
+      create: {
         subscriberId,
         channelId,
-        subscribedFromVideoId: videoId || null, 
+        subscribedFromVideoId: videoId || null,
       },
     });
 
@@ -46,18 +42,17 @@ const unsubscribeChannel = async (req, res) => {
     const subscriberId = req.user.id;
     const { channelId } = req.params;
 
-    await prisma.subscription.delete({
+    await prisma.subscription.deleteMany({
       where: {
-        subscriberId_channelId: {
-          subscriberId,
-          channelId,
-        },
+        subscriberId,
+        channelId,
       },
     });
 
     res.json({ message: "Unsubscribed successfully" });
 
   } catch (error) {
+
     console.error("Unsubscribe error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -166,9 +161,14 @@ const getSubscribedVideos = async (req, res) => {
       },
     });
 
+    const processedBucket = process.env.S3_PROCESSED_BUCKET || "processed-videos";
     return res.json({
       success: true,
-      videos,
+      videos: videos.map((v) => ({
+        ...v,
+        thumbnailUrl: getPublicStorageUrl(processedBucket, v.thumbnailUrl),
+        views: Number(v.views),
+      })),
     });
 
   } catch (error) {

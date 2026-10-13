@@ -60,95 +60,111 @@ const createUpload = async (req, res) => {
     }
 
     const videoId = uuid();
+const { validateSafeUrl } = require("../../../lib/ssrfValidator");
+
     let finalThumbnailUrl = null;
 
-try {
-  // CASE 1 — thumbnail sent as file (multipart)
-  if (req.file) {
-    const thumbKey = `thumbnails/${videoId}.jpg`;
+    try {
+      // CASE 1 — thumbnail sent as file (multipart)
+      if (req.file) {
+        const thumbKey = `thumbnails/${videoId}.jpg`;
 
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_PROCESSED_BUCKET,
-        Key: thumbKey,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-      })
-    );
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: process.env.S3_PROCESSED_BUCKET,
+            Key: thumbKey,
+            Body: req.file.buffer,
+            ContentType: req.file.mimetype,
+          })
+        );
 
-finalThumbnailUrl = `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/${process.env.S3_PROCESSED_BUCKET}/${thumbKey}`;
+        const { getPublicStorageUrl } = require("../../../config/storageUrl");
+        finalThumbnailUrl = getPublicStorageUrl(process.env.S3_PROCESSED_BUCKET, thumbKey);
+      }
+      // CASE 2 — thumbnail as base64
+      else if (req.body.thumbnailBase64) {
+        const base64Data = req.body.thumbnailBase64.split(",")[1];
+        const buffer = Buffer.from(base64Data, "base64");
+        const thumbKey = `thumbnails/${videoId}.jpg`;
 
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: process.env.S3_PROCESSED_BUCKET,
+            Key: thumbKey,
+            Body: buffer,
+            ContentType: "image/jpeg",
+          })
+        );
 
+        const { getPublicStorageUrl } = require("../../../config/storageUrl");
+        finalThumbnailUrl = getPublicStorageUrl(process.env.S3_PROCESSED_BUCKET, thumbKey);
+      }
+      // CASE 3 — thumbnail from URL (with SSRF protection)
+      else if (req.body.thumbnailUrl) {
+        await validateSafeUrl(req.body.thumbnailUrl);
 
+        const response = await axios.get(req.body.thumbnailUrl, {
+          responseType: "arraybuffer",
+          timeout: 5000,
+          maxContentLength: 5 * 1024 * 1024, // 5MB limit
+          maxRedirects: 3,
+        });
 
-}
+        const thumbKey = `thumbnails/${videoId}.jpg`;
 
-  // CASE 2 — thumbnail as base64
-  else if (req.body.thumbnailBase64) {
-    const base64Data = req.body.thumbnailBase64.split(",")[1];
-    const buffer = Buffer.from(base64Data, "base64");
-    const thumbKey = `thumbnails/${videoId}.jpg`;
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: process.env.S3_PROCESSED_BUCKET,
+            Key: thumbKey,
+            Body: response.data,
+            ContentType: response.headers["content-type"] || "image/jpeg",
+          })
+        );
 
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_PROCESSED_BUCKET,
-        Key: thumbKey,
-        Body: buffer,
-        ContentType: "image/jpeg",
-      })
-    );
-
-finalThumbnailUrl = `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/${process.env.S3_PROCESSED_BUCKET}/${thumbKey}`;
-
-
-
-}
-
-  // CASE 3 — thumbnail from URL
-  else if (req.body.thumbnailUrl) {
-    const response = await axios.get(req.body.thumbnailUrl, {
-      responseType: "arraybuffer",
-    });
-
-    const thumbKey = `thumbnails/${videoId}.jpg`;
-
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_PROCESSED_BUCKET,
-        Key: thumbKey,
-        Body: response.data,
-        ContentType: "image/jpeg",
-      })
-    );
-finalThumbnailUrl = `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/${process.env.S3_PROCESSED_BUCKET}/${thumbKey}`;
-}
-} catch (err) {
-  console.error("Thumbnail upload failed:", err);
-}
+        const { getPublicStorageUrl } = require("../../../config/storageUrl");
+        finalThumbnailUrl = getPublicStorageUrl(process.env.S3_PROCESSED_BUCKET, thumbKey);
+      }
+    } catch (err) {
+      console.error("Thumbnail upload failed / validation error:", err.message);
+      if (err.message.includes("forbidden") || err.message.includes("restricted") || err.message.includes("Invalid URL")) {
+        return res.status(400).json({
+          message: `Invalid thumbnail URL: ${err.message}`,
+          error: "SSRF_VALIDATION_ERROR",
+        });
+      }
+    }
 
     const s3Key = `raw/${videoId}/${originalName || "video.mp4"}`;
 
     console.log(" Creating video record:", { videoId, s3Key });
 
-    // 5. Create video record in database
+    // 5. Create video record and upload session in database
     try {
-await prisma.video.create({
-  data: {
-    id: videoId,
-    title: title,
-    description: description,
-    userId: userId,
-    status: "UPLOADING",
-    originalFileUrl: `raw/${videoId}/${originalName}`,
-    fileSize: fileSize ? String(fileSize) : null, // ✅ Convert to string or null
-    mimeType: mimeType,
-    originalName: originalName,
-    uploadProgress: 0,
-    thumbnailUrl: finalThumbnailUrl
-
-  }
-})
-      console.log(" Video record created");
+      await prisma.video.create({
+        data: {
+          id: videoId,
+          title: title,
+          description: description,
+          userId: userId,
+          status: "UPLOADING",
+          originalFileUrl: `raw/${videoId}/${originalName}`,
+          fileSize: fileSize ? String(fileSize) : null,
+          mimeType: mimeType,
+          originalName: originalName,
+          uploadProgress: 0,
+          thumbnailUrl: finalThumbnailUrl,
+          uploadSession: {
+            create: {
+              totalChunks: 1,
+              uploadedChunks: 0,
+              chunkSize: Number(fileSize) || 0,
+              totalSize: BigInt(fileSize || 0),
+              status: "IN_PROGRESS",
+            },
+          },
+        },
+      });
+      console.log(" Video record & upload session created");
     } catch (dbError) {
       console.error(" Database error:", dbError);
       return res.status(500).json({ 

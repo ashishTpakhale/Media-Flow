@@ -62,6 +62,9 @@ const recordView = async (req, res) => {
     console.log(` Qualifies for view: ${qualifiesForView}`);
 
     const result = await prisma.$transaction(async (tx) => {
+      // Concurrency lock: Serialize simultaneous view recording for the same user & video
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId} || ':' || ${videoId}))`;
+
       console.log(" Checking if user already viewed...");
 
       //  FIX: Use findUnique instead of findFirst to check existing history

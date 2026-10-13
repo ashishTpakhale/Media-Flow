@@ -10,12 +10,12 @@ function freshnessScore(date) {
   return Math.exp(-ageDays / 30); // ~30-day decay
 }
 
-function rankVideos(videos, queryContext) {
+function rankVideos(videos, queryContext = {}) {
   return videos.map(video => {
-    const textScore = normalize(video._textScore || 1);
+    const textScore = normalize(video._textScore != null ? video._textScore : 0.5);
     const engagementScore = normalize(video.views, 1_000_000);
     const freshScore = freshnessScore(video.createdAt);
-    const intentBoost = queryContext.intent.video || 0.5;
+    const intentBoost = queryContext.intent?.video || 0.5;
 
     const score =
       textScore * 0.4 +
@@ -29,8 +29,9 @@ function rankVideos(videos, queryContext) {
 
 function rankChannels(channels) {
   return channels.map(channel => {
-    const textScore = normalize(channel._textScore || 1);
-    const authorityScore = normalize(channel.subscribers || 1000);
+    const textScore = normalize(channel._textScore != null ? channel._textScore : 0.5);
+    const subCount = channel._count?.subscribers ?? (typeof channel.subscribers === "number" ? channel.subscribers : 0);
+    const authorityScore = normalize(subCount, 100_000);
     const activityScore = freshnessScore(channel.createdAt);
 
     const score =

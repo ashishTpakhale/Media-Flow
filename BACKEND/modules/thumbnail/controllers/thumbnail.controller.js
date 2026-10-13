@@ -21,6 +21,11 @@ const updateThumbnail = async (req, res) => {
       return res.status(404).json({ message: "Video not found" });
     }
 
+    // Authorization: only the video owner can update the thumbnail
+    if (existingVideo.userId !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden: Not the video owner" });
+    }
+
     //  Step 2 — Delete old thumbnail if exists
     if (existingVideo.thumbnailUrl) {
       const oldKey = existingVideo.thumbnailUrl.split(
@@ -49,7 +54,8 @@ const updateThumbnail = async (req, res) => {
       })
     );
 
-const thumbUrl = `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/${process.env.S3_PROCESSED_BUCKET}/${thumbKey}`;
+    const { getPublicStorageUrl } = require("../../../config/storageUrl");
+    const thumbUrl = getPublicStorageUrl(process.env.S3_PROCESSED_BUCKET, thumbKey);
     await prisma.video.update({
       where: { id: videoId },
       data: { thumbnailUrl: thumbUrl },

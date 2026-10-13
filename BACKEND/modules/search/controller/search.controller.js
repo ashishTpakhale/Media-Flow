@@ -6,6 +6,7 @@ const blendService = require("../services/blend.service");
 const queryParser = require("../../../queryParser");
 const prisma = require("../../../lib/prisma");
 const redis = require("../../../lib/redis");
+const { getPublicStorageUrl } = require("../../../config/storageUrl");
 
 /* ------------------ USER CONTEXT BUILDER ------------------ */
 async function buildUserContext(userId) {
@@ -60,7 +61,9 @@ module.exports = {
       /* ---------- Phase 3: Candidate Generation ---------- */
       const {
         videoCandidates,
-        channelCandidates
+        videoTextScores = {},
+        channelCandidates,
+        channelTextScores = {}
       } = await searchService.generateCandidates(parsedQuery, type);
 
       /* ---------- Phase 4: Fetch Full Data with Relations ---------- */
@@ -68,7 +71,7 @@ module.exports = {
       let channels = [];
 
       if (videoCandidates.length && type !== "channel") {
-        videos = await prisma.video.findMany({
+        const fetchedVideos = await prisma.video.findMany({
           where: { id: { in: videoCandidates } },
           select: {
             id: true,
@@ -79,7 +82,7 @@ module.exports = {
             views: true,
             createdAt: true,
             userId: true,
-            //  Include channel/user information
+            // Include channel/user information
             user: {
               select: {
                 id: true,
@@ -91,10 +94,15 @@ module.exports = {
             }
           }
         });
+
+        videos = fetchedVideos.map(v => ({
+          ...v,
+          _textScore: videoTextScores[v.id] || 0.5
+        }));
       }
 
       if (channelCandidates.length && type !== "video") {
-        channels = await prisma.user.findMany({
+        const fetchedChannels = await prisma.user.findMany({
           where: { id: { in: channelCandidates } },
           select: {
             id: true,
@@ -104,7 +112,7 @@ module.exports = {
             bio: true,
             isVerified: true,
             createdAt: true,
-            //  Include counts
+            // Include counts
             _count: {
               select: {
                 subscribers: true,
@@ -113,6 +121,11 @@ module.exports = {
             }
           }
         });
+
+        channels = fetchedChannels.map(c => ({
+          ...c,
+          _textScore: channelTextScores[c.id] || 0.5
+        }));
       }
 
       /* ---------- Phase 5: Ranking ---------- */
@@ -150,7 +163,7 @@ module.exports = {
         id: video.id,
         title: video.title,
         description: video.description,
-        thumbnailUrl: video.thumbnailUrl,
+        thumbnailUrl: getPublicStorageUrl(process.env.S3_PROCESSED_BUCKET || "processed-videos", video.thumbnailUrl),
         duration: video.duration,
         views: video.views,
         createdAt: video.createdAt,

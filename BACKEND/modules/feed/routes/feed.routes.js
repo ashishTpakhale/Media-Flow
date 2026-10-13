@@ -1,7 +1,7 @@
 const express = require("express");
 const { authMiddleware } = require("../../../middleware/authMiddleware");
 const { getHomeFeed, getTrendingFeed ,getHybridHomeFeed, clearAllHistory, deleteHistoryItem, getWatchHistory } = require("../controller/feed.controller");
-const { recordView } = require("../../video/controllers/videoView.controller");
+const { recordView } = require("../../video/controllers/recordView.controller");
 
 const router = express.Router();
 

@@ -47,6 +47,8 @@ const HlsPlayer = ({ src, onPlay, onPause, onEnded }) => {
       hls.loadSource(src)
       hls.attachMedia(videoRef.current)
 
+      let networkRetries = 0
+
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         setQualities(data.levels.map((l, i) => ({
           index: i,
@@ -59,9 +61,22 @@ const HlsPlayer = ({ src, onPlay, onPause, onEnded }) => {
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad()
-          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
-          else hls.destroy()
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            networkRetries++
+            if (networkRetries <= 3) {
+              console.warn(`HLS Network error (attempt ${networkRetries}/3), retrying...`, data)
+              hls.startLoad()
+            } else {
+              console.error("HLS fatal network error: stream could not be loaded from", src)
+              setLoading(false)
+              hls.destroy()
+            }
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError()
+          } else {
+            setLoading(false)
+            hls.destroy()
+          }
         }
       })
 

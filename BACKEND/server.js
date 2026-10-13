@@ -40,7 +40,22 @@ const uploadLimiter = rateLimit({
   message: { error: "Upload limit reached" },
 });
 
-app.use(cors());
+const rawOrigins = process.env.CLIENT_URL || "http://localhost:5173,http://localhost:3000";
+const allowedOrigins = rawOrigins.split(",").map((o) => o.trim());
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS policy violation: origin ${origin} not allowed`));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 app.use(express.json());
 app.use("/api", limiter);
 app.use("/api/videos/upload", uploadLimiter);

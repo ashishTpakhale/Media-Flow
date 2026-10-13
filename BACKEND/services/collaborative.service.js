@@ -6,27 +6,31 @@ const prisma = new PrismaClient();
  * "Users who watched X also watched Y"
  */
 const getCollaborativeVideos = async (userId) => {
-  // Videos watched by current user
+  // Sample recent videos watched by current user (bounded to 50)
   const watched = await prisma.watchHistory.findMany({
     where: { userId },
     select: { videoId: true },
+    orderBy: { watchedAt: "desc" },
+    take: 50,
   });
 
   if (watched.length === 0) return [];
 
   const watchedIds = watched.map((w) => w.videoId);
 
-  // Find other users who watched same videos
+  // Sample other users who watched same videos (bounded to 200)
   const similarUsers = await prisma.watchHistory.findMany({
     where: {
       videoId: { in: watchedIds },
       userId: { not: userId },
     },
     select: { userId: true },
+    take: 200,
   });
 
-  const userIds = [...new Set(similarUsers.map((u) => u.userId))];
+  const userIds = [...new Set(similarUsers.map((u) => u.userId))].slice(0, 50);
   if (userIds.length === 0) return [];
+
 
   // Videos those users watched (excluding already watched)
   const videos = await prisma.video.findMany({

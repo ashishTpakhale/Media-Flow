@@ -217,12 +217,10 @@ const getVideoMetadata = (filePath) => {
               })
             );
             
-            console.log(` [THUMBNAIL] S3 upload result:`, uploadResult);
-            
-const thumbUrl = `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/public/${process.env.S3_PROCESSED_BUCKET}/${thumbKey}`;
+            const { getPublicStorageUrl } = require("./config/storageUrl");
+            const thumbUrl = getPublicStorageUrl(process.env.S3_PROCESSED_BUCKET, thumbKey);
 
-
-const updateResult = await prisma.video.update({
+            const updateResult = await prisma.video.update({
               where: { id: videoId },
               data: { thumbnailUrl: thumbUrl },
             });
@@ -393,25 +391,34 @@ endTranscode();
             where: { id: videoId },
           });
         if (videoExists) {
-    await prisma.video.update({
-      where: { id: videoId },
-      data: {
-        status: "PROCESSING_FAILED",
-        errorMessage: error.message,
-        processingAttempts: { increment: 1 },
-        lastProcessedAt: new Date(),
-      },
-    });
+          const maxAttempts = job.opts?.attempts || 1;
+          const isFinalAttempt = (job.attemptsMade + 1) >= maxAttempts;
 
-    // ADD THIS RIGHT HERE ↓
+          await prisma.video.update({
+            where: { id: videoId },
+            data: {
+              status: isFinalAttempt ? "PROCESSING_FAILED" : "PROCESSING",
+              processingStage: isFinalAttempt ? "FAILED" : "RETRYING",
+              errorMessage: error.message,
+              processingAttempts: { increment: 1 },
+              lastProcessedAt: new Date(),
+            },
+          });
 
-          } else {
-            console.error(` Cannot update - video ${videoId} doesn't exist`);
-          }
-        } catch (updateError) {
-          console.error(` Error updating video status:`, updateError.message);
+          publishVideoUpdate(userId, videoId, {
+            status: isFinalAttempt ? "PROCESSING_FAILED" : "PROCESSING",
+            processingStage: isFinalAttempt ? "FAILED" : "RETRYING",
+            error: error.message,
+            attemptsMade: job.attemptsMade + 1,
+            maxAttempts,
+          });
+        } else {
+          console.error(` Cannot update - video ${videoId} doesn't exist`);
         }
-        throw error;
+      } catch (updateError) {
+        console.error(` Error updating video status:`, updateError.message);
+      }
+      throw error;
       } finally {
         // --------------------
         // CLEANUP

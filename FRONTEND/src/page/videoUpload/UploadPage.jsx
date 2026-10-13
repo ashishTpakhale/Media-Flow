@@ -81,9 +81,16 @@ const videoIdRef = useRef(null)
               setTimeout(() => {
                 reset()
               }, 3000)
-            } else if (data.status === "FAILED") {
+            } else if (data.status === "FAILED" || data.status === "PROCESSING_FAILED" || data.status === "UPLOAD_FAILED") {
               setUploadPhase("failed")
-              setStatus("❌ Video processing failed. Please try again.")
+              const failMsg = data.status === "UPLOAD_FAILED" 
+                ? "❌ Video upload failed. Please verify storage and try again."
+                : `❌ Video processing failed${data.error ? `: ${data.error}` : ". Please try again."}`
+              setStatus(failMsg)
+              setUploading(false)
+            } else if (data.status === "CANCELLED") {
+              setUploadPhase("idle")
+              setStatus("Video upload was cancelled.")
               setUploading(false)
             }
           }
@@ -190,12 +197,50 @@ const videoIdRef = useRef(null)
         reject(new Error("Network error during upload"))
       }
       
+      xhr.open("PUT", url)
+      xhr.setRequestHeader("Content-Type", file.type || "video/mp4")
+      xhr.send(file)
+    })
+
+  /* ---------------- FALLBACK BACKEND UPLOAD ---------------- */
+  const uploadToBackend = (videoId, file) =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhrRef.current = xhr
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100)
+          setProgress(percent)
+          setStatus(`Uploading... ${percent}%`)
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve()
+        } else {
+          let errorMsg = `Server upload failed with status ${xhr.status}`
+          try {
+            const parsed = JSON.parse(xhr.responseText)
+            if (parsed.message) errorMsg = parsed.message
+          } catch (_) {}
+          reject(new Error(errorMsg))
+        }
+      }
+
+
+      xhr.onerror = () => {
+        reject(new Error("Network error during server upload"))
+      }
+
       xhr.onabort = () => {
         reject(new Error("Upload cancelled"))
       }
 
-      xhr.open("PUT", url)
-      xhr.setRequestHeader("Content-Type", file.type)
+      xhr.open("PUT", `${BASE_URL}/upload/direct-file/${videoId}`)
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`)
+      xhr.setRequestHeader("Content-Type", file.type || "video/mp4")
       xhr.send(file)
     })
 
@@ -232,10 +277,16 @@ const videoIdRef = useRef(null)
       setVideoId(newVideoId)
       videoIdRef.current = newVideoId
       
-      setStatus("Uploading to cloud storage...")
+      setStatus("Uploading video...")
 
-      // Step 2: Upload to S3 with progress tracking
-      await uploadToS3(uploadUrl, video, newVideoId)
+      // Step 2: Upload to S3 with automatic fallback to server stream
+      try {
+        await uploadToS3(uploadUrl, video, newVideoId)
+      } catch (s3Err) {
+        console.warn("Direct storage PUT failed, falling back to backend stream channel...", s3Err)
+        setStatus("Uploading via direct stream...")
+        await uploadToBackend(newVideoId, video)
+      }
 
       setStatus("Finalizing upload...")
       setProgress(100)

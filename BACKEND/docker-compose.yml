@@ -6,8 +6,8 @@ services:
     container_name: appdb
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: appdb
+      POSTGRES_PASSWORD: root123
+      POSTGRES_DB: mediaflow
     ports:
       - "5432:5432"
     volumes:
@@ -40,8 +40,9 @@ services:
     container_name: minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: password
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -64,7 +65,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc alias set myminio http://minio:9000 admin password;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
       /usr/bin/mc mb myminio/user-media --ignore-existing;
       /usr/bin/mc mb myminio/raw-videos --ignore-existing;
       /usr/bin/mc mb myminio/processed-videos --ignore-existing;

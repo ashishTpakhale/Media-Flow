@@ -17,7 +17,6 @@ export const useVideoActions = (
   video,
   setVideo
 ) => {
-  const navigate = useNavigate  ()
   const refreshVideoLikes = async () => {
     try {
       const res = await axios.get(`${API_BASE}/videos/${id}/likes`, {
@@ -26,7 +25,11 @@ export const useVideoActions = (
         },
       })
 
-      setLiked(res.data.likedByUser)
+      const isLiked = Boolean(res.data.likedByUser);
+      setLiked(isLiked);
+      if (isLiked) {
+        setDisliked(false);
+      }
       setVideo(prev => ({
         ...prev,
         likes: res.data.totalLikes,
@@ -79,12 +82,33 @@ export const useVideoActions = (
     }
   }
 
-  const handleDislike = () => {
+  const handleDislike = async () => {
+    if (!token) {
+      navigate('/signin')
+      return
+    }
+
     if (disliked) {
       setDisliked(false)
     } else {
       setDisliked(true)
-      setLiked(false)
+      if (liked) {
+        try {
+          await axios.delete(`${API_BASE}/videos/like/${id}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          })
+          setLiked(false)
+          setVideo(prev => ({
+            ...prev,
+            likes: Math.max((prev.likes || 1) - 1, 0),
+          }))
+          await refreshVideoLikes()
+        } catch (err) {
+          console.error("Unlike on dislike failed:", err)
+        }
+      }
     }
   }
 

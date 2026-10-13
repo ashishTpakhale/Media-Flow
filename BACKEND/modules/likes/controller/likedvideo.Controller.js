@@ -1,5 +1,5 @@
 const { PrismaClient } = require("@prisma/client");
-const { get } = require("mongoose");
+const { getPublicStorageUrl } = require("../../../config/storageUrl");
 const prisma = new PrismaClient();
 
 const likeVideo = async (req, res) => {
@@ -7,21 +7,15 @@ const likeVideo = async (req, res) => {
     const userId = req.user.id;
     const { videoId } = req.params;
 
-    const existingLike = await prisma.like.findUnique({
+    await prisma.like.upsert({
       where: {
         userId_videoId: {
           userId,
           videoId,
         },
       },
-    });
-
-    if (existingLike) {
-      return res.json({ message: "Already liked" });
-    }
-
-    await prisma.like.create({
-      data: {
+      update: {},
+      create: {
         userId,
         videoId,
       },
@@ -35,19 +29,15 @@ const likeVideo = async (req, res) => {
   }
 };
 
-
-
 const unlikeVideo = async (req, res) => {
   try {
     const userId = req.user.id;
     const { videoId } = req.params;
 
-    await prisma.like.delete({
+    await prisma.like.deleteMany({
       where: {
-        userId_videoId: {
-          userId,
-          videoId,
-        },
+        userId,
+        videoId,
       },
     });
 
@@ -59,14 +49,15 @@ const unlikeVideo = async (req, res) => {
   }
 };
 
-
 const likedvideos = async (req, res) => {
   try {
     const userId = req.user.id;
+    const processedBucket = process.env.S3_PROCESSED_BUCKET || "processed-videos";
 
     const likes = await prisma.like.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
+      take: 50,
       include: {
         video: {
           include: {
@@ -83,14 +74,22 @@ const likedvideos = async (req, res) => {
       },
     });
 
-    const filteredLikes = likes.filter(
-      l => l.video?.status === "READY" && l.video?.visibility === "PUBLIC"
-    );
+    const filteredLikes = likes
+      .filter((l) => l.video?.status === "READY" && l.video?.visibility === "PUBLIC")
+      .map((l) => ({
+        ...l,
+        video: {
+          ...l.video,
+          thumbnailUrl: getPublicStorageUrl(processedBucket, l.video.thumbnailUrl),
+          views: Number(l.video.views),
+        },
+      }));
 
     return res.json({
       success: true,
       data: filteredLikes,
     });
+
 
   } catch (error) {
     console.error("Liked videos error:", error);

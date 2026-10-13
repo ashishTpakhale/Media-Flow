@@ -14,7 +14,11 @@ const RelatedVideos = ({ videos, formatViews, formatDate }) => {
               <img
                 src={v.thumbnailUrl || 'https://via.placeholder.com/168x94/333/666?text=No+Thumbnail'}
                 alt={v.title}
-                className="w-[168px] h-[94px] rounded-lg object-cover"
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="168" height="94" viewBox="0 0 168 94"><rect width="100%" height="100%" fill="%2327272a"/><polygon points="74,37 100,47 74,57" fill="%2371717a"/></svg>';
+                }}
+                className="w-[168px] h-[94px] rounded-lg object-cover bg-zinc-800"
               />
               {v.duration && (
                 <span className="absolute bottom-1 right-1 bg-black bg-opacity-80 text-white text-xs px-1 rounded">

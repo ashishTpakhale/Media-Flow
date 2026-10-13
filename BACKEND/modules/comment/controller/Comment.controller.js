@@ -245,25 +245,32 @@ const toggleCommentLike = async (req, res) => {
     const comment = await prisma.comment.findUnique({ where: { id: commentId } });
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
-    const existing = await prisma.commentLike.findUnique({
-      where: { userId_commentId: { userId, commentId } },
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.commentLike.findUnique({
+        where: { userId_commentId: { userId, commentId } },
+      });
+
+      if (existing) {
+        await tx.commentLike.delete({ where: { userId_commentId: { userId, commentId } } });
+        const updated = await tx.comment.update({
+          where: { id: commentId },
+          data: { likes: { decrement: 1 } },
+          select: { likes: true },
+        });
+        return { liked: false, likes: Math.max(0, updated.likes) };
+      } else {
+        await tx.commentLike.create({ data: { userId, commentId } });
+        const updated = await tx.comment.update({
+          where: { id: commentId },
+          data: { likes: { increment: 1 } },
+          select: { likes: true },
+        });
+        return { liked: true, likes: updated.likes };
+      }
     });
 
-    if (existing) {
-      // Already liked → unlike
-      await Promise.all([
-        prisma.commentLike.delete({ where: { userId_commentId: { userId, commentId } } }),
-        prisma.comment.update({ where: { id: commentId }, data: { likes: { decrement: 1 } } }),
-      ]);
-      res.json({ liked: false, likes: Math.max(0, comment.likes - 1) });
-    } else {
-      // Not liked → like
-      await Promise.all([
-        prisma.commentLike.create({ data: { userId, commentId } }),
-        prisma.comment.update({ where: { id: commentId }, data: { likes: { increment: 1 } } }),
-      ]);
-      res.json({ liked: true, likes: comment.likes + 1 });
-    }
+    res.json(result);
+
   } catch (err) {
     console.error("toggleCommentLike error:", err);
     res.status(500).json({ error: "Failed to toggle like" });

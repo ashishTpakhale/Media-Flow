@@ -3,10 +3,14 @@ const jwt = require("jsonwebtoken")
 
 let io
 
+const rawOrigins = process.env.CLIENT_URL || "http://localhost:5173,http://localhost:3000";
+const allowedOrigins = rawOrigins.split(",").map((o) => o.trim());
+
 const initializeWebSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: true, // allow all origins
+      origin: allowedOrigins.includes("*") ? "*" : allowedOrigins,
+      credentials: true,
       methods: ["GET", "POST"],
     },
   })
@@ -56,8 +60,8 @@ const Redis = require("ioredis");
 const subscriber = new Redis({
   host: process.env.REDIS_HOST || "localhost",
   port: parseInt(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD,
-  tls: {}
+  ...(process.env.REDIS_PASSWORD ? { password: process.env.REDIS_PASSWORD } : {}),
+  ...(process.env.REDIS_TLS === "true" ? { tls: { rejectUnauthorized: false } } : {}),
 });
 
 

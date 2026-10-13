@@ -34,11 +34,23 @@ router.get("/likedvideos", authMiddleware, likedvideos);
 router.post("/like/:videoId", authMiddleware, likeVideo);
 router.delete("/like/:videoId", authMiddleware, unlikeVideo);
 
+const {
+  initChunkSession,
+  getChunkUploadUrl,
+  recordChunkUploaded,
+} = require("../controllers/chunkUpload.controller");
+const { directUploadFile } = require("../controllers/directUpload.controller");
+
 // Upload endpoints
-router.post("/upload/init", authMiddleware,  upload.single("thumbnail"), // 👈 optional thumbnail
-  createUpload);
+router.post("/upload/init", authMiddleware, upload.single("thumbnail"), createUpload);
 router.post("/upload/complete", authMiddleware, completeUpload);
 router.put("/upload/progress/:videoId", authMiddleware, updateUploadProgress);
+router.put("/upload/direct-file/:videoId", authMiddleware, directUploadFile);
+
+// Chunked Upload endpoints (supports UploadSession & UploadChunk schema)
+router.post("/upload/chunk-init", authMiddleware, initChunkSession);
+router.post("/upload/chunk-url", authMiddleware, getChunkUploadUrl);
+router.post("/upload/chunk-complete", authMiddleware, recordChunkUploaded);
 
 // Video endpoints
 router.get("/stream/:id", getStreamUrl);

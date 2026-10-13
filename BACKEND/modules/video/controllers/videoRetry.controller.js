@@ -1,24 +1,8 @@
 const { PrismaClient } = require("@prisma/client");
-const { Queue } = require("bullmq");
+const { videoQueue } = require("../../../queues/videoQueue");
+const { emitVideoUpdate } = require("../../../websocket");
 
 const prisma = new PrismaClient();
-
-// Must match worker queue name exactly
-// const videoQueue = new Queue("video-processing", {
-//   connection: {
-//     host: process.env.REDIS_HOST || "localhost",
-//     port: process.env.REDIS_PORT || 6379,
-//   },
-// });
-
-const videoQueue = new Queue("video-processing", {
-  connection: {
-    host: process.env.REDIS_HOST,
-    port: Number(process.env.REDIS_PORT),
-    password: process.env.REDIS_PASSWORD,
-    tls: { rejectUnauthorized: false }, // ← fix
-  },
-});
 const retryProcessing = async (req, res) => {
   try {
     const videoId = req.params.id;
@@ -63,20 +47,40 @@ if (video.processingAttempts >= MAX_RETRIES) {
       data: {
         status: "PROCESSING",
         errorMessage: null,
-        processingStage: null,
+        processingStage: "RETRY_QUEUED",
       },
     });
 
-    // 5️ Re-enqueue job
-    await videoQueue.add("process-video", {
-      videoId: video.id,
-      userId: video.userId,
-      s3Key: video.originalFileUrl,
+    // 5️ Re-enqueue job cleanly with unified options
+    await videoQueue.remove(videoId).catch(() => {});
+    await videoQueue.add(
+      "process-video",
+      {
+        videoId: video.id,
+        userId: video.userId,
+        s3Key: video.originalFileUrl,
+      },
+      {
+        jobId: videoId,
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 5000,
+        },
+      }
+    );
+
+    // 6️ Notify user via WebSocket
+    emitVideoUpdate(userId, videoId, {
+      status: "PROCESSING",
+      processingStage: "RETRY_QUEUED",
+      uploadProgress: 100,
     });
 
     return res.json({
       message: "Processing retry started",
       videoId,
+      status: "PROCESSING",
     });
 
   } catch (error) {

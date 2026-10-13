@@ -5,9 +5,13 @@ const { getHybridFeed } = require("../../recommendation/services/hybridRank.serv
 const prisma = new PrismaClient();
 const PAGE_SIZE = 10;
 
+const { getPublicStorageUrl } = require("../../../config/storageUrl");
+
 function serializeVideo(video) {
+  const processedBucket = process.env.S3_PROCESSED_BUCKET || "processed-videos";
   return {
     ...video,
+    thumbnailUrl: getPublicStorageUrl(processedBucket, video.thumbnailUrl),
     views: Number(video.views),
     fileSize: video.fileSize ? Number(video.fileSize) : null,
   };
@@ -83,12 +87,10 @@ const deleteHistoryItem = async (req, res) => {
     const userId = req.user.id;
     const { videoId } = req.params;
 
-    await prisma.watchHistory.delete({
+    await prisma.watchHistory.deleteMany({
       where: {
-        userId_videoId: {
-          userId,
-          videoId,
-        },
+        userId,
+        videoId,
       },
     });
 
@@ -115,6 +117,7 @@ const clearAllHistory = async (req, res) => {
 const getWatchHistory = async (req, res) => {
   try {
     const userId = req.user.id;
+    const processedBucket = process.env.S3_PROCESSED_BUCKET || "processed-videos";
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -149,12 +152,24 @@ const getWatchHistory = async (req, res) => {
       },
     });
 
+    const formatted = historyEntries.map((entry) => ({
+      ...entry,
+      video: entry.video
+        ? {
+            ...entry.video,
+            thumbnailUrl: getPublicStorageUrl(processedBucket, entry.video.thumbnailUrl),
+            views: Number(entry.video.views),
+          }
+        : null,
+    }));
+
     return res.json({
       success: true,
       page,
       limit,
-      data: historyEntries,
+      data: formatted,
     });
+
 
   } catch (error) {
     console.error("History Feed Error:", error);

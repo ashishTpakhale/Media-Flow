@@ -34,10 +34,21 @@ const cancelVideo = async (req, res) => {
 
   await prisma.video.update({
     where: { id },
-    data: { status: "FAILED", visibility: "PRIVATE" },
+    data: { status: "CANCELLED", visibility: "PRIVATE" },
   });
 
-  res.json({ message: "Video cancelled" });
+  await prisma.uploadSession.updateMany({
+    where: { videoId: id },
+    data: { status: "CANCELLED" },
+  }).catch(() => {});
+
+  const { emitVideoUpdate } = require("../../../websocket");
+  emitVideoUpdate(userId, id, {
+    status: "CANCELLED",
+    message: "Video upload was cancelled by user",
+  });
+
+  res.json({ message: "Video cancelled", status: "CANCELLED" });
 };
 
 module.exports = { cancelVideo };

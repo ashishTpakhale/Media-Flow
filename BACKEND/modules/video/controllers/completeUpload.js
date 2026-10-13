@@ -55,32 +55,42 @@ const completeUpload = async (req, res) => {
 
       await prisma.video.update({
         where: { id: videoId },
-        data: { status: "FAILED" },
+        data: { status: "UPLOAD_FAILED" },
       });
 
       emitVideoUpdate(userId, videoId, {
-        status: "FAILED",
-        error: "File not found or invalid",
+        status: "UPLOAD_FAILED",
+        error: "File not found or invalid in storage",
       });
 
       return res.status(400).json({
         message: "Upload failed or file missing",
+        status: "UPLOAD_FAILED",
       });
     }
 
-    //UPDATE STATUS
-   //UPDATE STATUS
-const updatedVideo = await prisma.video.update({
-  where: { id: videoId },
-  data: {
-    status: "PROCESSING",
-    uploadProgress: 100,
-  },
-});
+    // UPDATE STATUS
+    const updatedVideo = await prisma.video.update({
+      where: { id: videoId },
+      data: {
+        status: "PROCESSING",
+        uploadProgress: 100,
+      },
+    });
 
-console.log(` Video ${videoId} updated to PROCESSING`);
-console.log(` S3 Key: ${video.originalFileUrl}`);
-    //ADD TO QUEUE
+    // Mark upload session completed
+    await prisma.uploadSession.updateMany({
+      where: { videoId },
+      data: {
+        uploadedChunks: 1,
+        status: "COMPLETED",
+        completedAt: new Date(),
+      },
+    }).catch((sessionErr) => console.warn("UploadSession update skipped:", sessionErr.message));
+
+    console.log(` Video ${videoId} updated to PROCESSING`);
+    console.log(` S3 Key: ${video.originalFileUrl}`);
+    // ADD TO QUEUE
     await videoQueue.add(
       "process-video",
       {
