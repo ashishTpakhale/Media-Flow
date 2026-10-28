@@ -20,6 +20,7 @@ MediaFlow separates latency-sensitive request handling from expensive, failure-p
 
 ## Architecture
 
+![MediaFlow Architecture](./Media-Flow-Architecture.png)
 
 
 **Upload and processing flow**
